@@ -1,0 +1,104 @@
+
+/*
+<future>头文件主要类：
+class _Associated_state:(相关状态)//这是一个多态类
+	_Ty _Result;				//运行结果
+	exception_ptr _Exception;	//保存异常的指针
+	mutex _Mtx;					//互斥锁
+	condition_variable _Cond;	//条件变量
+	bool _Retrieved;			//运行结果是否被取走
+	int _Ready;					//函数是否运行完毕
+	bool _Ready_at_thread_exit;	//是否在函数运行结束后将_Ready设为已准备
+	bool _Has_stored_result;	//是否存储运行结果
+	bool _Running;				//函数是否已经开始了运行
+	_Atomic_counter_t _Refs;	//引用计数
+	 _Mydel* _Deleter;			//销毁器
+*/
+/*
+class _State_manager:(状态管理器)
+	_Associated_state<_Ty>* _Assoc_state;		//封装一个_Associated_state
+	//这个指针极为重要，使得继承自_Associated_state的类可以互相转换，为延迟启动线程提供了可能
+	bool _Get_only_once;			//状态是否处于可共享状态(一般用于区分future和shared_future)
+*/
+/*
+class future:(期望)					注:	将_Get_only_once设为true
+	public: _State_manager			//继承自_State_manager
+*/
+/*
+class shared_future:(被共享的期望)	注:	将_Get_only_once设为false
+	public: _State_manager			//继承自_State_manager
+*/
+/*
+class _Promise:(承诺)				注：不被直接使用的版本
+	_State_manager<_Ty> _State;		//状态管理器
+    bool _Future_retrieved;			//期望是否被取走
+*/
+/*
+class promise:(承诺)
+	_Promise<_Ty> _MyPromise;		//基类对象(对_Promise的封装)
+*/
+/*
+class _Packaged_state<_Ret&(_ArgTypes...)>(被打包的状态)
+	public: _Associated_state<_Ret*>	//继承自_Associated_state
+	function<_Ret&(_ArgTypes...)> _Fn	//函数
+*/
+/*
+class packaged_task
+	_Promise<_Ptype> _MyPromise;	//_Promise
+	//这里的_Promise中的_Associated_state<_Ty>* _Assoc_state指向的实际上是一个_Packaged_state对象，调用Fn时被转换成_Packaged_state类型
+*/
+/*
+class _Deferred_async_state(推迟的异步状态)	注:此线程构造时不会执行对应的函数
+	public:_Packaged_state
+*/
+/*
+class _Task_async_state(运行中的异步状态)	注:此线程构造时会立即调用_CreatedTask包装执行对应的函数
+	public:_Packaged_state
+	::Concurrency::task<void> _Task;
+*/
+//注：还有一些比如销毁器之类的辅助类，或者一些给予派生类某些特性的类，此处不一一列出
+/*		多种方式获得的future
+通过async生成的future：
+在构造时将函数和参数封装在一个tuple中，传给了一个function对象，
+调用时直接运行了_Call_immediate函数，这个函数调用该function对象的operator()函数，并将该返回值赋值给_Result，而且捕捉异常
+而以async为第一参数版本，创建了一个_Task_async_state对象，在将参数包传递给function对象之后，
+直接创建了一个task对象，该对象创建了另外一个线程，这个线程为一个lambda函数，只有一个语句，这个语句为运行_Call_immediate()函数，
+创建tasking对象后将_Runing设为true以免get时多次调用function对象，
+该 _Task_async_state类重载了_Get_value和_Wait函数，在运行这个重载时等待task对象后调用其基类版本；
+deferred版本的在则重载了_Has_deferred_function()和Run_deferred_function()，没有其他成员,
+这两个函数会被基类_Associated_state中的_Maybe_run_deferred_function()函数依次调用；
+而async|deferred会直接执行async版本，因为在区分时只区分了是否为deferred版本
+通过promise生成的future：
+promise类在构造时创建的类_Associated_state，不是其派生类，使其不具备_Packaged_state的派生类的可以调用函数的特性，
+使其它只能用于保存值和异常，这是最纯粹的future。
+直接调用future的默认构造函数生成的future：
+这里的_Associated_state<_Ty>* _Assoc_state被设为nullptr，没有为其申请空间，没有任何意义，
+因为其成员函数除构造系函数、运算符系函数和析构函数之外皆调用了_Assoc_state成员，如果_Assoc_state为nullptr为空会抛出异常，
+其状态如同share或move后的future。
+*/
+/*
+关于_Associated_state中的wait系列成员函数
+wait_for和wait_until的调用先执行了_Associated_state的_Has_deferred_function()函数，检测是否需要等待，该函数默认返回false，
+而_Deferred_async_state对其进行了重载，检查_Running是否为true，之后调用condition_variable _Cond成员变量的对应wait系成员函数；
+wait函数的调用先检查_Running，如果没有运行就执行_Run_deferred_function，这个函数默认什么也不做，
+_Deferred_async_state重载了它，来运行它所继承的_Fn，在这些之后执行_Cond的wait()。
+condition_variable _Cond中的wait具体实现见condition_variable;
+而_Task_async_state类则重载为调用task的wait成员函数。
+*/
+/*		其它的一些其他事情
+关于asnyc:
+async实际上是根据第一参数是否为deferred分别构建_Deferred_async_state对象或者是_Task_async_state对象，然后执行其中一个的getfuture();
+而这两个对象都是继承自_Packaged_state，_Deferred_async_state对象和packaged_task对象在内存结构上没人任何区别，只是接口不同。
+而_Task_async_state则引入了一个task对象实现异步操作。
+关于future和shared_future:
+future和shared_future实际上就是对其指向的_Associated_state系对象的一次封装，根据实际对象的不同执行不同的虚函数，
+将实现方式并不相同的_Associated_state系的各个对象统一起来，并提供统一的接口，而其他类中的getfuture函数实际上是构造了一个future，
+而不是这些类的对象本身就内含了一个future。
+关于_Associated_state
+_Associated_state名为相关状态，保存了一个函数有关的一些状态，上述其余类皆为对其的继承与封装:
+继承:需要对接口进行重载,不提供getfuture，没有被用户直接使用，地址可以作为future的构造函数的参数并装在future里。
+封装:不需要对接口进行重载，提供getfuture，大部分被用户直接使用，和future相对独立但是可以把_Associated_state系对象取出来构建一个future
+关于promise:
+promise中的set_exception并不是promise独有的，而是来自_Associated_state，所以上述所有类大部分可以设置异常(包括future)，
+主要用于构建一个最简单的future，并在构建之前同样提供相同的功能。
+*/
