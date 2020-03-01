@@ -1,4 +1,4 @@
-
+//未经允许禁止任何人转载
 /*
 <future>头文件主要类：
 class _Associated_state:(相关状态)//这是一个多态类
@@ -57,6 +57,9 @@ class _Task_async_state(运行中的异步状态)	注:此线程构造时会立�
 	::Concurrency::task<void> _Task;
 */
 //注：还有一些比如销毁器之类的辅助类，或者一些给予派生类某些特性的类，此处不一一列出
+
+阅读下面的内容需要先看懂上面的类的继承、条套关系，否则阅读很可能存在困难
+
 /*		多种方式获得的future
 通过async生成的future：
 在构造时将函数和参数封装在一个tuple中，传给了一个function对象，
