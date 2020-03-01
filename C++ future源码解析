@@ -1,3 +1,4 @@
+//以下内容基于visual studio自带的编译器MSVC中的future头文件
 //未经允许禁止任何人转载
 /*
 <future>头文件主要类：
