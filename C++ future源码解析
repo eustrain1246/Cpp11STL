@@ -1,6 +1,9 @@
-//以下内容基于visual studio自带的编译器MSVC中的future头文件
-//未经允许禁止任何人转载
-/*
+//以下内容基于visual studio自带的编译器MSVC中的future头文件  
+Copyright [2020] [李兴鑫]
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+
+
 <future>头文件主要类：
 class _Associated_state:(相关状态)//这是一个多态类
 	_Ty _Result;				//运行结果
