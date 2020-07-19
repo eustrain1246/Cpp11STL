@@ -1,0 +1,96 @@
+
+Copyright [2020] [李兴鑫]
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+
+#include <iostream>
+using std::cin;
+using std::cout;
+using std::cerr;
+using std::endl;
+#define BIG_OBJECT 5000
+#undef BIG_OBJECT//如果想调用后面的函数3，最好把行注释掉，这样对象会比较大
+class MyClass {//自定义类
+public:
+	//一个公开的数据，这样好调用（测试，没必要隐藏）
+	int data;
+#ifdef BIG_OBJECT
+	int64_t arr[BIG];//一个很大的数据
+#endif
+	MyClass(int data) :data(data) {}//含参构造函数
+	MyClass() = default;//平凡的默认构造函数，若要使用new[]，就需要一个默认构造函数，但不要求是平凡的
+	~MyClass() {//析构函数
+		cout << "MyClass has deconstructed\t data is " << data << endl;//当析构的时候提醒一下，并且显示出这个对象的data的值
+	}
+	static MyClass defaultObject;//定义一个静态的对象，后面测试用
+public://用户自定义new 和delete
+	//下面的static 和 _cdecl 关键字是可有可无的
+	//申请内存的方式，这段代码后调用构造函数
+	static void* _cdecl operator new(size_t size) {	//参数中的size指的是对象大小，但是在这个函数中并没有实际意义，但是必须得有这个参数
+													//参数只需要保证第一个参数为size_t即可，后面还可以加任意参数比如new(size_t size, const char* const cstr)等
+													//在调用时用new(arg) className即可
+		//if (size == 0) size = 1;//对于特定类中重载的new，并不需要这个语句，因为对象的大小是已经确定的
+		cerr << "user defined operator new has been called\n" << "size = " << size << "\n";//由于测试时内存可能会不足，所以直接用cerr而不是cout了
+		//return &defaultObject;//返回内置对象的地址
+		//申请空间，然后返回申请的空间的首地址（这里写在一个语句中了）
+		return malloc(size);	//这里直接从堆空间中拿，自己做的时候可以先申请一大块空间，然后自己慢慢分，每次new的时候拿一块，delete的时候再还回来
+								//这里的参数size可以直接写成4，因为对象的大小就是4，但如果对象的大小有变化，那么这里也需要修改，当然也可以用sizeof(MyClass)
+	}
+	//内存的释放方式，析构函数后调用这段代码
+	static void _cdecl operator delete(void* block, size_t size) {	//参数中的block指的是已经进行过析构的对象的地址，该函数的作用就是将block指向的内存释放掉；
+																	//同样的，这里的size也指对象大小，并没有什么用，但是在这里可以省略
+																	//对于void* block 或 size_t size后面的参数与new类似，不一定要加size_t size，但是加了参数的版本只能由系统调用
+																	//在new的时候，当类的构造函数抛出异常时，会调用相同参数的delete
+		cerr << "user defined operator delete has been called\n" << "block = " << block << "\tsize = " << size << "\n";//同new
+		cerr << "block: " << reinterpret_cast<MyClass*>(block)->data << endl;
+		//根据首地址释放对应的内存空间
+		free(block);//如果在自定义delete中没有释放内存，则会造成内存泄漏
+	}
+	/*
+		自定义new 和delete 的意义在于阻止程序直接从堆内存申请空间，而申请空间是需要性能的
+		通过用户自定义内存池（较简化与C++默认的内存分配方式）可以在特定情况下减少对内存的频繁申请与释放
+		而且可以直接通过销毁内存池来直接销毁所有对象（但是不会经过析构函数），在一定程度上避免了内存泄漏
+	*/
+public://用户自定义new[]和delete[]
+	//这里的size是将要申请的整个一大块内存的大小，而不是一个对象的大小也不是对象的数量
+	static void* _cdecl operator new[](size_t size) {//不知为何会多一个对象的大小的空间，这一现象与debug模式无关
+		cerr << "user defined operator new[] has been called\n" << "size = " << size << "\n";
+		return malloc(size);
+	};//Visual Studio不知道出了什么状况，后面一行的operator delete[]总是会自动排版到下一个制表符的位置，所以这里加了个";"，并没有什么实际意义、
+	//size为将要释放的空间的大小，和new[]是一样的值
+	static void _cdecl operator delete[](void* block, size_t size) {
+		cerr << "user defined operator delete[] has been called\n" << "block = " << block << "\tsize = " << size << "\n";
+		free(block);
+	}
+};
+MyClass MyClass::defaultObject = MyClass(99);//除常整型外，其他的静态成员必须在类的定义式外声明
+void func1() {	//函数1：new两个对象，输出它们的值，然后析构掉，主要测试语法及函数调用顺序
+	MyClass* p1 = new MyClass;		//默认版本
+	MyClass* p2 = new MyClass(2);	//有参版本
+	//输出对象的信息
+	cout << "defaultObject:\t" << &MyClass::defaultObject << "\tdefaultObject.0ata\t" << MyClass::defaultObject.data << endl
+		<< "p1:\t" << p1 << "\tp1->data:\t" << p1->data << endl
+		<< "p2:\t" << p2 << "\tp2->data:\t" << p2->data << endl;
+	//销毁对象
+	delete p1;
+	delete p2;
+}
+void func2() {	//函数2：不停地申请和释放空间（不断地new和delete），测试是否会出现内存泄漏问题
+b:				//在使用这个函数的时候最好注释掉#undef BIG_OBJECT，要不然内存增长得有点慢
+	MyClass* p = new MyClass;	//申请空间
+	delete p;					//释放空间
+	goto b;						//循环loop
+}
+void func3() {	//测试一下new[]和delete[]的语法
+	MyClass* p = new MyClass[4];//申请4个MyClass对象
+	delete[] p;					//把这4个MyClass对象析构掉
+}
+void(*func_arr[])() = { func1,func2,func3 };//函数指针数组，main函数用
+int main() //main函数
+{
+	int n;
+	cin >> n;
+	func_arr[n - 1]();//调用函数n
+
+	cout << "Program has dead" << endl;//提示程序已经结束，在这句话后面析构的对象都是由系统自动释放
+}
