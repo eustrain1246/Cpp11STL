@@ -8,17 +8,27 @@ using std::cin;
 using std::cout;
 using std::cerr;
 using std::endl;
-#define BIG_OBJECT 5000
-#undef BIG_OBJECT//如果想调用后面的函数3，最好把行注释掉，这样对象会比较大
+//这个文件中对new_handle的实现与Effective C++仔细看没啥区别
+void new_handler_1();
+void new_handler_2();
+#define NEW_HANDLER 2
+#define BIG_OBJECT 50000
+#define GLOBAL_NEW_DELETE
+bool key = false;
+int* BIG_DATA = new int[1000000];
+//#undef BIG_OBJECT//如果想调用后面的函数3，最好把行注释掉，这样对象会比较大
+//#undef NEW_HANDLER//使用用户自定义的new_handler
+//#undef GLOBAL_NEW_DELETE //全局自定义new和delete
 class MyClass {//自定义类
 public:
 	//一个公开的数据，这样好调用（测试，没必要隐藏）
 	int data;
 #ifdef BIG_OBJECT
-	int64_t arr[BIG];//一个很大的数据
+	int64_t big_data[BIG_OBJECT];//一个很大的数据
 #endif
 	MyClass(int data) :data(data) {}//含参构造函数
 	MyClass() = default;//平凡的默认构造函数，若要使用new[]，就需要一个默认构造函数，但不要求是平凡的
+	//MyClass() { cerr << "MyClass Object has created.\n"; }//在对象创建时输出一条信息
 	~MyClass() {//析构函数
 		cout << "MyClass has deconstructed\t data is " << data << endl;//当析构的时候提醒一下，并且显示出这个对象的data的值
 	}
@@ -32,9 +42,29 @@ public://用户自定义new 和delete
 		//if (size == 0) size = 1;//对于特定类中重载的new，并不需要这个语句，因为对象的大小是已经确定的
 		cerr << "user defined operator new has been called\n" << "size = " << size << "\n";//由于测试时内存可能会不足，所以直接用cerr而不是cout了
 		//return &defaultObject;//返回内置对象的地址
+#ifdef NEW_HANDLER 
+		//C++并不支持对类专设new_handle,new_handle是为std::operator new 服务的，但是我们可以
+		//在用户自定义的new中将系统的new_handle换成这个类特有的new_handle
+		//之后调用std::operaotr new
+		//最后将系统的new_handle恢复
+		class NewHandlerHolder {//资源管理类，自动恢复new_handle，当然也可以用std::unique_ptr来控制
+			std::new_handler handler;
+		public:
+			NewHandlerHolder(std::new_handler n_h) :handler(n_h) {}
+			~NewHandlerHolder() { std::set_new_handler(handler); }
+		};
+		//下面这个语句：
+		//在set_new_handler被调用时会将原来的new_handler作为返回值，于是，这个管理类储存了set_new_handler的返回值，也就是之前的new_handler,最后会在结束时恢复
+		//但我觉得这么写在多线程中会出问题
+		NewHandlerHolder holder(std::set_new_handler(currentHandler));//保证在这个operator new函数结束之后将new_handler恢复
+			//将全局的new_handler替换为这个类的new_handler
+		return ::operator new(size);					//调用全局的operator new
+#else
 		//申请空间，然后返回申请的空间的首地址（这里写在一个语句中了）
 		return malloc(size);	//这里直接从堆空间中拿，自己做的时候可以先申请一大块空间，然后自己慢慢分，每次new的时候拿一块，delete的时候再还回来
 								//这里的参数size可以直接写成4，因为对象的大小就是4，但如果对象的大小有变化，那么这里也需要修改，当然也可以用sizeof(MyClass)
+		//直接用上面的函数其实无法保证内存对齐
+#endif
 	}
 	//内存的释放方式，析构函数后调用这段代码
 	static void _cdecl operator delete(void* block, size_t size) {	//参数中的block指的是已经进行过析构的对象的地址，该函数的作用就是将block指向的内存释放掉；
@@ -53,16 +83,76 @@ public://用户自定义new 和delete
 	*/
 public://用户自定义new[]和delete[]
 	//这里的size是将要申请的整个一大块内存的大小，而不是一个对象的大小也不是对象的数量
-	static void* _cdecl operator new[](size_t size) {//不知为何会多一个对象的大小的空间，这一现象与debug模式无关
+	static void* _cdecl operator new[](size_t size) //传进来的size不知为何会多一个对象的大小，这一现象与debug模式无关
+	{
 		cerr << "user defined operator new[] has been called\n" << "size = " << size << "\n";
 		return malloc(size);
 	};//Visual Studio不知道出了什么状况，后面一行的operator delete[]总是会自动排版到下一个制表符的位置，所以这里加了个";"，并没有什么实际意义、
 	//size为将要释放的空间的大小，和new[]是一样的值
-	static void _cdecl operator delete[](void* block, size_t size) {
+	static void _cdecl operator delete[](void* block, size_t size) 
+	{
 		cerr << "user defined operator delete[] has been called\n" << "block = " << block << "\tsize = " << size << "\n";
 		free(block);
 	}
+public://自定义 new_handler
+	static std::new_handler currentHandler;
+	static std::new_handler set_new_handler(std::new_handler p)noexcept//这个函数的定义并没有受到什么限制，只不过标准的std::set_new_handler是这样写的
+	{
+		cerr << "MyClass::set_new_handler has been call\t new_handler's address is " << p << endl;
+		std::new_handler oldHandler = currentHandler;
+		currentHandler = p;
+		return oldHandler;
+	}
+
 };
+std::new_handler MyClass::currentHandler = nullptr;
+
+#ifdef GLOBAL_NEW_DELETE
+//用户自定义全局new和delete
+void* operator new(size_t size) {
+	if (size == 0)
+		size = 1;
+	void* p = malloc(size);
+	if(p == nullptr)
+	{
+		std::new_handler newHandler = std::get_new_handler();
+		if (newHandler)
+			while (p == nullptr) {
+				newHandler();
+				p = malloc(size);
+			}
+		else
+			throw(std::bad_alloc());
+	}
+	return p;
+}
+void operator delete(void* block, size_t size) {
+	free(block);
+}
+
+//用户自定义全局new[]和delete[]
+void* operator new[](size_t size) {
+	if (size == 0)
+		size = 1;
+	void* p = malloc(size);
+	if (p == nullptr)
+	{
+		std::new_handler newHandler = std::get_new_handler();
+		if (newHandler)
+			while (p == nullptr) {
+				newHandler();
+				p = malloc(size);
+			}
+		else
+			throw(std::bad_alloc());
+	}
+	return p;
+}
+void operator delete[](void* block, size_t size) {
+	free(block);
+}
+
+#endif
 MyClass MyClass::defaultObject = MyClass(99);//除常整型外，其他的静态成员必须在类的定义式外声明
 void func1() {	//函数1：new两个对象，输出它们的值，然后析构掉，主要测试语法及函数调用顺序
 	MyClass* p1 = new MyClass;		//默认版本
@@ -76,7 +166,7 @@ void func1() {	//函数1：new两个对象，输出它们的值，然后析构�
 	delete p2;
 }
 void func2() {	//函数2：不停地申请和释放空间（不断地new和delete），测试是否会出现内存泄漏问题
-b:				//在使用这个函数的时候最好注释掉#undef BIG_OBJECT，要不然内存增长得有点慢
+b:				//在使用这个函数的时候最好注释掉#undef BIG_OBJECT，要不然内存变化得有点慢
 	MyClass* p = new MyClass;	//申请空间
 	delete p;					//释放空间
 	goto b;						//循环loop
@@ -85,12 +175,60 @@ void func3() {	//测试一下new[]和delete[]的语法
 	MyClass* p = new MyClass[4];//申请4个MyClass对象
 	delete[] p;					//把这4个MyClass对象析构掉
 }
-void(*func_arr[])() = { func1,func2,func3 };//函数指针数组，main函数用
+
+void func4() {
+	std::set_new_handler(new_handler_1);
+	int* p1 = new int[500000000];
+	cerr << "p1 has creator, it's address is " << p1 << endl;
+	int* p2 = new int[500000000];
+	cerr << "p2 has creator, it's address is " << p1 << endl;
+	int* p3 = new int[500000000];
+	cerr << "p3 has creator, it's address is " << p1 << endl;
+	int* p4 = new int[500000000];
+	cerr << "p4 has creator, it's address is " << p1 << endl;
+	int* p5 = new int[500000000];
+	cerr << "p5 has creator, it's address is " << p1 << endl;
+	int* p6 = new int[500000000];
+	cerr << "p6 has creator, it's address is " << p1 << endl;
+}
+
+void func5() {//如果要调用这个函数，请将 #undef NEW_HANDLER 和 #undef BIG_OBJECT注释掉
+	MyClass::set_new_handler(new_handler_2);
+go:
+	MyClass* p = new MyClass;	//申请空间
+	if(!key)
+		goto go;
+	delete p;
+	MyClass::set_new_handler(nullptr);	//将MyClass的new_handler设为默认，其实也没啥用
+										//但是在此后，如果new MyClass就可能抛出bad_alloc异常，而不是调用new_handler_2了
+	int* p1 = new int[500000000];
+}
+
+void(*func_arr[])() = { func1,func2,func3,func4,func5 };//函数指针数组，main函数用
 int main() //main函数
 {
+	int* p = (int*)malloc(2048);
+	free(p);
+	free(p);
 	int n;
 	cin >> n;
 	func_arr[n - 1]();//调用函数n
 
 	cout << "Program has dead" << endl;//提示程序已经结束，在这句话后面析构的对象都是由系统自动释放
+}
+
+void new_handler_1() {//当内存申请失败时的错误处理函数
+	static size_t i = 500;
+	cerr << "new_handler_1 has called\a" << endl;
+	if (!--i) exit(-1);//当new_handle_1被执行500次后结束程序
+	//do_nothing
+}
+
+void new_handler_2() {
+	static int i = 500;
+	cerr << "new_handler_2 has called\a" << endl;
+	if (--i <= 0) {
+		key = true;//解锁
+		delete[]BIG_DATA;//释放空间
+	}
 }
