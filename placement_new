@@ -1,0 +1,69 @@
+Copyright [2020] [李兴鑫]
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+
+//placement new 的使用方式
+#include<iostream>
+#include<WinSock2.h>
+//void* operator new(size_t size, void* block)noexcept{
+//	if (block == nullptr)
+//		throw(std::bad_alloc());
+//	return block;
+//}
+
+class MyClass 
+{
+	int data;
+public:
+	MyClass(int data) :data(data) {}
+	//MyClass() = default;
+	~MyClass() { std::cerr << "MyClass Object has deconstructed, data is " << data << std::endl; }
+	int get()const { return data; }
+};
+
+void func1() {
+	constexpr size_t length = 10;
+
+	//method 1
+	//MyClass Objects[length];
+
+	//method 2
+	//MyClass* Objects = new MyClass[length];
+	//MyClass* Objects = reinterpret_cast<MyClass*>(malloc(sizeof(MyClass) * length));
+	//需要delete[]
+
+	//method 3 最佳方案
+	//char some_memory[sizeof(MyClass) * length];
+	//memset(some_memory, 0, sizeof(MyClass) * length);
+	//MyClass* Objects = reinterpret_cast<MyClass*>(some_memory);
+
+	//method 4
+	//MyClass* Objects = reinterpret_cast<MyClass*>(calloc(length, sizeof(MyClass)));
+	//需要free
+
+
+
+	std::cout << "Objects:" << std::endl;
+	for (size_t i = 0; i < length; ++i)
+		std::cout << Objects[i].get() << std::endl;
+	std::cout << std::endl;
+
+	MyClass* p = Objects;
+	while (p != Objects + length)new(p++)MyClass((p - Objects));
+	//while (reinterpret_cast<MyClass*>(new(p++)MyClass((p - Objects))) != Objects + length);
+	std::cout << "Objects:" << std::endl;
+	for (size_t i = 0; i < length; ++i)
+		std::cout << Objects[i].get() << std::endl;
+//	delete[] Objects;
+	p = Objects;
+	while (p != Objects + length)
+		(p++)->~MyClass();
+	//free(Objects);
+	//delete[] Objects;
+	std::cout << std::endl;
+}
+int main() {
+	std::cout << "func1 has called" << std::endl;
+	func1();
+	std::cerr << "func1 has exit" << std::endl;
+}
