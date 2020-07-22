@@ -1,0 +1,118 @@
+
+Copyright [2020] [李兴鑫]
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+
+#include<iostream>
+#include<stack>
+
+#define BETTER_ADD 0
+
+using std::cout;
+using std::cin;
+using std::endl;
+
+//以下优化方案建立在栈对象于返回值拷贝之后销毁的基础上
+
+class INT {
+public:
+	explicit INT(int value) : value(value) { std::cout << "The INT has constructed and it's value is \t\t" << value << std::endl; }
+	INT(const INT& rhs) :value(rhs.value) { std::cout << "The INT has constructed by copy and it's value is \t" << value << std::endl; }
+	~INT() { std::cout << "The INT has deconstructed and it's value is \t\t" << value << std::endl; }
+	int value;
+	operator int() { return value; }
+#if BETTER_ADD
+	INT operator ++(int) {
+		struct AutoAdd {
+			AutoAdd(int& reference) :reference(reference) {}
+			~AutoAdd() { ++reference; }
+			int& reference;
+		};
+		AutoAdd autoAdd(value);
+		return INT(value);
+	}
+#else
+	INT operator ++(int) {
+		INT temp = *this;
+		++value;
+		return temp;
+	}
+#endif
+};
+
+//这种结构不需要优化
+std::stack<INT>& operator >>(std::stack<INT>& s, INT& i) {
+	i.value = s.top().value;
+	s.pop();
+	return s;
+}
+
+//传统方法
+INT myPop_0(std::stack<INT>& stack) {
+	INT ret_value = stack.top();
+	stack.pop();
+	return ret_value;
+}
+
+//可以调用移动构造函数降低构造“临时对象”的成本
+INT myPop_1(std::stack<INT>& stack) {
+	INT ret_value = std::move(stack.top());
+	stack.pop();
+	return ret_value;
+}
+
+//当存储的数据结构大于8个字节，且没有移动构造函数或者是移动构造的成本仍较高，可以通过这种方法进行优化，相应的会造成一定的代码膨胀
+INT myPop_2(std::stack<INT>& stack) {
+	struct AutoPop {
+		AutoPop(std::stack<INT>& stack) :stack(stack) {}
+		~AutoPop() { stack.pop(); }
+		std::stack<INT>& stack;//保存一个引用，为了在函数结束后调用stack.pop()，因为不能在类的内部调用类外的局部变量
+	}autopop(stack);
+	return stack.top();
+}
+
+void func1() {
+	std::cout << "Func1 has Began" << std::endl;
+	std::stack<INT> s1, s2;
+	s1.push(INT(1));
+	s1.push(INT(2));
+	s2.push(INT(1));
+	s2.push(INT(2));
+
+	std::cout << "s1:" << std::endl;
+	std::cout << myPop_1(s1) << std::endl;
+	std::cout << s1.top() << std::endl;
+
+	std::cout << "s2:" << std::endl;
+	std::cout << myPop_2(s2) << std::endl;
+	std::cout << s2.top() << std::endl;
+	std::cout << "Func1 is going to over" << std::endl;
+}
+
+void func2() {
+
+	INT i1(1);
+	std::cout << i1 << std::endl;
+	std::cout << i1++ << std::endl;
+	std::cout << i1 << std::endl;
+
+}
+
+void func3() {
+	std::stack<INT> s;
+	s.push(INT(1));
+	s.push(INT(2));
+	s.push(INT(3));
+	s.push(INT(4));
+	INT i1(0);
+	INT i2(0);
+	INT i3(0);
+	INT i4(0);
+	s >> i1 >> i2 >> i3 >> i4;
+	std::cout << i1 << i2 << i3 << i4;
+}
+int main() {
+	std::cout << "Function Start" << std::endl;
+	func3();
+	std::cerr << "Function End\n";
+}
